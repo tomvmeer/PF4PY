@@ -8,19 +8,28 @@ import pandas as pd
 
 class EventLog:
     def __init__(self, name, event_id, timestamp_id, log=None, resource_id=None):
-        # Loading in a log object previously loaded:
-        if not log:
-            log = self.load(name)  # TODO implement faster loading.
-        self.log = log
+        self.segment_count = {}
+
         # Names of keys in log file:
         self.event_id = event_id
         self.timestamp_id = timestamp_id
         self.resource_id = resource_id
-        # Name of the dataset.
-        self.name = name
-        # Set the begin and end date. Later adjusted to represent actual dates in the log.
+
+        # Loading in a log object previously loaded:
+        if not log:
+            self.log = self.load(name)  # TODO implement faster loading.
+        else:
+            self.log = log
+            self.clean_timezone()
+
+        # Set the begin and end date.
         self.first = datetime.datetime(9999, 12, 31)
         self.last = datetime.datetime(1, 1, 1)
+        # Counting the types of traces, this method also fixes first and last, initialized above.
+        self.event_count = self.count_trace_types()
+
+        # Name of the dataset.
+        self.name = name
 
         # Initialize Performance Spectrum Data Frame:
         self.pf = pd.DataFrame()
@@ -30,8 +39,6 @@ class EventLog:
         self.x_max = 0
         # Saved filtering of segments used to plot.
         self.segments = []
-        # Counting the types of traces, this method also fixes first and last, initialized above.
-        self.event_count = self.count_trace_types()
 
     def clean_timezone(self):
         """
@@ -62,7 +69,7 @@ class EventLog:
         """
         for i in range(len(self.log)):
             trace = (self.log[i][0][self.event_id], self.log[i][-1][self.event_id])
-
+            self.event_count = {}
             if self.log[i][0][self.timestamp_id] < self.first:
                 self.first = self.log[i][0][self.timestamp_id]
             if self.log[i][-1][self.timestamp_id] > self.last:
@@ -78,7 +85,6 @@ class EventLog:
         """
         Output: count of how often each segment in a trace occurred.
         """
-        self.segment_count = {}
         for i in range(len(self.log)):
             for n in range(0, len(self.log[i]) - 1):
                 segment = (self.log[i][n][self.event_id], self.log[i][n + 1][self.event_id])
