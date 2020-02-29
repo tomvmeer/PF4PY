@@ -239,7 +239,7 @@ class EventLog:
             self.pf.loc[self.pf['segment_index'] == i, 'class'] = classifier(
                 self.pf[self.pf['segment_index'] == i][metric], *args)
 
-    def plot_performance_spectrum(self, class_colors, ax, mask=None):
+    def plot_performance_spectrum(self, class_colors, ax, mask=None, order=None, alpha=0.25):
         """
         Input: class_colors: list with rgba tuples, there should be a color for each class. ax: A Matplotlib axis
         object. mask: any Pandas mask on the Performance Spectrum Data Frame to be considered before plotting.
@@ -249,8 +249,8 @@ class EventLog:
             pf = self.pf[mask].copy()
         else:
             pf = self.pf.copy()
-
-        for i in range(len(class_colors), -1, -1):
+        plotting_order =  range(len(class_colors)) if order == 'reversed' else reversed(range(len(class_colors)))
+        for i in plotting_order:
             lines = [[start, end] for start, end in
                      zip(pf[pf['class'] == i]['start'], pf[pf['class'] == i]['end'])]
             ax.add_collection(
@@ -262,4 +262,4 @@ class EventLog:
             ax.text(0.05, y[0] / (abs(ax.get_ylim()[0]) + abs(ax.get_ylim()[1])), text_str, transform=ax.transAxes,
                     fontsize=12,
                     verticalalignment='top', bbox=props)
-            ax.add_collection(plt.hlines(y, 0, max(pf['end_time']), alpha=0.25))
+            ax.add_collection(plt.hlines(y, 0, max(pf['end_time']), alpha=alpha))
