@@ -114,7 +114,7 @@ class EventLog:
                     filtered_segments.append(list(sorted_counts.keys())[i])
                 else:
                     return filtered_segments
-                
+
     @staticmethod
     def batch_classifier(df, k_min=10, gamma=0):
         """
@@ -126,12 +126,13 @@ class EventLog:
         batches = []
         temp_batch = []
 
-        df_sorted = df.sort_values(by = ['start_time', 'end_time'], axis = 0)
+        df_sorted = df.sort_values(by=['start_time', 'end_time'], axis=0)
         observations = df_sorted.reset_index()
 
         temp_batch.append(0)
-        for j in range(1,len(observations)):
-            if observations['end_time'][j-1] <= observations['end_time'][j] <= gamma + observations['end_time'][j-1] and observations['start_time'][j] >= observations['start_time'][j-1] or observations['start_time'][j-1] <= observations['start_time'][j] <= gamma + observations['start_time'][j-1] and observations['end_time'][j] >= observations['end_time'][j-1]:
+        for j in range(1, len(observations)):
+            if observations['end_time'][j - 1] <= observations['end_time'][j] <= gamma + observations['end_time'][
+                j - 1] and observations['start_time'][j] >= observations['start_time'][j - 1]:
                 temp_batch.append(j)
                 if j == len(observations) - 1 and len(temp_batch) >= k_min:
                     batches.append(temp_batch)
@@ -146,15 +147,15 @@ class EventLog:
             is_classified = False
             for i in range(len(batches)):
                 if j in batches[i]:
-    #                 classes.append(i)
+                    #                 classes.append(i)
                     classes.append(1)
                     is_classified = True
             if not is_classified:
-    #             classes.append(np.nan)
+                #             classes.append(np.nan)
                 classes.append(0)
         observations['class'] = classes
         return list(observations.sort_values(by='index')['class'])
-    
+
     @staticmethod
     def classify_duration_hist(duration, num_classes):
         """
