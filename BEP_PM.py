@@ -67,9 +67,9 @@ class EventLog:
         """
         Output: count of how often each unique trace occurs.
         """
+        self.event_count = {}
         for i in range(len(self.log)):
             trace = (self.log[i][0][self.event_id], self.log[i][-1][self.event_id])
-            self.event_count = {}
             if self.log[i][0][self.timestamp_id] < self.first:
                 self.first = self.log[i][0][self.timestamp_id]
             if self.log[i][-1][self.timestamp_id] > self.last:
@@ -114,7 +114,7 @@ class EventLog:
                     filtered_segments.append(list(sorted_counts.keys())[i])
                 else:
                     return filtered_segments
-                
+
     @staticmethod
     def batch_classifier(df, k_min=10, gamma=0, dev = 1):
         """
@@ -127,12 +127,13 @@ class EventLog:
         start_batches = []
         end_batches = []
         temp_batch = []
-        df_sorted = df.sort_values(by = ['start_time', 'end_time'], axis = 0)
+        df_sorted = df.sort_values(by=['start_time', 'end_time'], axis=0)
         observations = df_sorted.reset_index()
 
-        for j in range(1,len(observations)):
-            if observations['end_time'][j-1] <= observations['end_time'][j] <= gamma + observations['end_time'][j-1] and observations['start_time'][j] >= observations['start_time'][j-1]: 
-
+        temp_batch.append(0)
+        for j in range(1, len(observations)):
+            if observations['end_time'][j - 1] <= observations['end_time'][j] <= gamma + observations['end_time'][
+                j - 1] and observations['start_time'][j] >= observations['start_time'][j - 1]:
                 temp_batch.append(j)
                 if j == len(observations) - 1 and len(temp_batch) >= k_min:
                     end_batches.append(temp_batch)
@@ -154,7 +155,7 @@ class EventLog:
                     break
 
             if not is_classified:
-    #             classes.append(np.nan)
+                #             classes.append(np.nan)
                 classes.append(0)
 
 
@@ -207,7 +208,7 @@ class EventLog:
 
         observations['class'] = classes
         return list(observations.sort_values(by='index')['class'])
-    
+
     @staticmethod
     def classify_duration_hist(duration, num_classes):
         """
@@ -236,6 +237,15 @@ class EventLog:
                     classes.append(3)
         return classes
 
+    def build_coordinates(self, start_x, end_x):
+        self.pf['start'] = [(x, y) for x, y in zip(start_x, self.pf['start_y'])]
+        self.pf['end'] = [(x, y) for x, y in zip(end_x, self.pf['end_y'])]
+
+    def classify(self, classifier, metric, args):
+        for i in range(len(self.segments)):
+            self.pf.loc[self.pf['segment_index'] == i, 'class'] = classifier(
+                self.pf[self.pf['segment_index'] == i][metric], *args)
+
     def performance_spectrum(self, segments, x_max, classifier, metric, args, segment_height=20):
         """
         Input: segments: Array with defined start and end name of all the segments to be included. x_max: maximum x
@@ -246,8 +256,8 @@ class EventLog:
         self.x_max = x_max
         self.segments = segments
         self.y_s = [[y, y - segment_height] for y in range(segment_height * len(segments), 0, -segment_height)]
-        segment_start = []
-        segment_end = []
+        segment_start = [[], []]
+        segment_end = [[], []]
         duration = []
         segment_names = []
         segment_index = []
@@ -264,8 +274,10 @@ class EventLog:
                         duration.append(end - start)
                         x = [start, end]
                         y = self.y_s[segments.index(segment)]
-                        segment_start.append((x[0], y[0]))
-                        segment_end.append((x[1], y[1]))
+                        segment_start[0].append(x[0])
+                        segment_start[1].append(y[0])
+                        segment_end[0].append(x[1])
+                        segment_end[1].append(y[1])
                         segment_names.append(segment)
                         segment_index.append(segments.index(segment))
                         trace_index.append(i)
@@ -275,22 +287,17 @@ class EventLog:
                             resource.append(def_resource)
 
         self.pf['resource'] = resource
-        self.pf['start'] = segment_start
-        self.pf['end'] = segment_end
+        self.pf['start_time'] = segment_start[0]
+        self.pf['start_y'] = segment_start[1]
+        self.pf['end_time'] = segment_end[0]
+        self.pf['end_y'] = segment_end[1]
         self.pf['duration'] = duration
         self.pf['segment_name'] = segment_names
         self.pf['segment_index'] = segment_index
         self.pf['case_id'] = trace_index
-        for x_col in zip(*self.pf['end']):
-            break
-        self.pf['end_time'] = x_col
-        for x_col in zip(*self.pf['start']):
-            break
-        self.pf['start_time'] = x_col
 
-        for i in range(len(self.segments)):
-            self.pf.loc[self.pf['segment_index'] == i, 'class'] = classifier(
-                self.pf[self.pf['segment_index'] == i][metric], *args)
+        self.build_coordinates(self.pf['start_time'], self.pf['end_time'])
+        self.classify(classifier, metric, args)
 
     def plot_performance_spectrum(self, class_colors, ax, mask=None, order=None, alpha=0.25):
         """
