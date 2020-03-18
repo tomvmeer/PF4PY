@@ -153,11 +153,9 @@ class EventLog:
                     classes.append(1)
                     is_classified = True
                     break
-
+                    
             if not is_classified:
-                #             classes.append(np.nan)
                 classes.append(0)
-
 
         temp_batch = []
         temp_batch.append(0)
@@ -165,9 +163,7 @@ class EventLog:
         for j in range(1,len(observations)):
             if classes[j] != 1:
                 if observations['start_time'][j] == observations['start_time'][j-1] and observations['end_time'][j-1] <= observations['end_time'][j]:
-        #             if observations['end_time'][j-1] <= observations['end_time'][j] <= gamma + observations['end_time'][j-1] and observations['start_time'][j] >= observations['start_time'][j-1]: 
-
-                    temp_batch.append(j)
+                   temp_batch.append(j)
                     if j == len(observations) - 1 and len(temp_batch) >= k_min:
                         end = observations['end_time'][temp_batch[0]:temp_batch[-1]+1].reindex(temp_batch)
                         mask = abs((end - end.median()) / end.std()) < dev
@@ -182,8 +178,6 @@ class EventLog:
                         cleaned_temp_batch = list(end[mask].index)
                         if len(cleaned_temp_batch) >= k_min:
                             start_batches.append(cleaned_temp_batch)
-
-
                     temp_batch = []
                     temp_batch.append(j)
             else:
@@ -194,8 +188,6 @@ class EventLog:
                     cleaned_temp_batch = list(end[mask].index)
                     if len(cleaned_temp_batch) >= k_min:
                         start_batches.append(cleaned_temp_batch)
-
-
                 temp_batch = []
                 temp_batch.append(j)
 
@@ -205,7 +197,6 @@ class EventLog:
                     if j in start_batches[batch]:
                         classes[j] = 2
                         break
-
         observations['class'] = classes
         return list(observations.sort_values(by='index')['class'])
 
