@@ -117,62 +117,74 @@ class EventLog:
                 
     @staticmethod
     def batch_classifier(df, k_min=10, gamma=0, dev = 1):
-    """
-    Input: df: Dataframe containing the start and end time of each line/(sub-)trace per segment.
-    k_min: number of subsequent lines/(sub-)traces that must fulfill the batching constraints to be considered a batch.
-    gamma: The distance allowed between subsequent lines/(sub-)traces to be considered a batch.
-    dev: The amount of standard deviations the standardized times can be apart from each other; The lower the value, the stricter the batching; 1 <= dev <= 4
-    Output: List of binary class values indicating if a line/(sub-)trace belongs to a batch.
-    """
-    start_batches = []
-    end_batches = []
-    temp_batch = []
-    df_sorted = df.sort_values(by = ['start_time', 'end_time'], axis = 0)
-    observations = df_sorted.reset_index()
-            
-    for j in range(1,len(observations)):
-        if observations['end_time'][j-1] <= observations['end_time'][j] <= gamma + observations['end_time'][j-1] and observations['start_time'][j] >= observations['start_time'][j-1]: 
+        """
+        Input: df: Dataframe containing the start and end time of each line/(sub-)trace per segment.
+        k_min: number of subsequent lines/(sub-)traces that must fulfill the batching constraints to be considered a batch.
+        gamma: The distance allowed between subsequent lines/(sub-)traces to be considered a batch.
+        dev: The amount of standard deviations the standardized times can be apart from each other; The lower the value, the stricter the batching; 1 <= dev <= 4
+        Output: List of binary class values indicating if a line/(sub-)trace belongs to a batch.
+        """
+        start_batches = []
+        end_batches = []
+        temp_batch = []
+        df_sorted = df.sort_values(by = ['start_time', 'end_time'], axis = 0)
+        observations = df_sorted.reset_index()
 
-            temp_batch.append(j)
-            if j == len(observations) - 1 and len(temp_batch) >= k_min:
-                end_batches.append(temp_batch)
-        else:
-            if len(temp_batch) >= k_min:
-                end_batches.append(temp_batch)
-                
-            temp_batch = []
-            temp_batch.append(j)
-    
-   # batches = start_batches + end_batches
-    classes = []
-    for j in range(len(observations)):
-        is_classified = False
-        for batch in range(len(end_batches)):
-            if j in end_batches[batch]:
-                classes.append(1)
-                is_classified = True
-                break
-           
-        if not is_classified:
-#             classes.append(np.nan)
-            classes.append(0)
-    
-    
-    temp_batch = []
-    temp_batch.append(0)
-    #start_temp_batch.append(0)
-    for j in range(1,len(observations)):
-        if classes[j] != 1:
-            if observations['start_time'][j] == observations['start_time'][j-1] and observations['end_time'][j-1] <= observations['end_time'][j]:
-    #             if observations['end_time'][j-1] <= observations['end_time'][j] <= gamma + observations['end_time'][j-1] and observations['start_time'][j] >= observations['start_time'][j-1]: 
+        for j in range(1,len(observations)):
+            if observations['end_time'][j-1] <= observations['end_time'][j] <= gamma + observations['end_time'][j-1] and observations['start_time'][j] >= observations['start_time'][j-1]: 
 
                 temp_batch.append(j)
                 if j == len(observations) - 1 and len(temp_batch) >= k_min:
-                    end = observations['end_time'][temp_batch[0]:temp_batch[-1]+1].reindex(temp_batch)
-                    mask = abs((end - end.median()) / end.std()) < dev
-                    cleaned_temp_batch = list(end[mask].index)
-                    if len(cleaned_temp_batch) >= k_min:
-                        start_batches.append(cleaned_temp_batch)
+                    end_batches.append(temp_batch)
+            else:
+                if len(temp_batch) >= k_min:
+                    end_batches.append(temp_batch)
+
+                temp_batch = []
+                temp_batch.append(j)
+
+       # batches = start_batches + end_batches
+        classes = []
+        for j in range(len(observations)):
+            is_classified = False
+            for batch in range(len(end_batches)):
+                if j in end_batches[batch]:
+                    classes.append(1)
+                    is_classified = True
+                    break
+
+            if not is_classified:
+    #             classes.append(np.nan)
+                classes.append(0)
+
+
+        temp_batch = []
+        temp_batch.append(0)
+        #start_temp_batch.append(0)
+        for j in range(1,len(observations)):
+            if classes[j] != 1:
+                if observations['start_time'][j] == observations['start_time'][j-1] and observations['end_time'][j-1] <= observations['end_time'][j]:
+        #             if observations['end_time'][j-1] <= observations['end_time'][j] <= gamma + observations['end_time'][j-1] and observations['start_time'][j] >= observations['start_time'][j-1]: 
+
+                    temp_batch.append(j)
+                    if j == len(observations) - 1 and len(temp_batch) >= k_min:
+                        end = observations['end_time'][temp_batch[0]:temp_batch[-1]+1].reindex(temp_batch)
+                        mask = abs((end - end.median()) / end.std()) < dev
+                        cleaned_temp_batch = list(end[mask].index)
+                        if len(cleaned_temp_batch) >= k_min:
+                            start_batches.append(cleaned_temp_batch)
+                else:
+                    if len(temp_batch) >= k_min:
+                        end = observations['end_time'][temp_batch[0]:temp_batch[-1]+1].reindex(temp_batch)
+                        start = observations['start_time'][temp_batch[0]:temp_batch[-1]+1].reindex(temp_batch)
+                        mask = abs((end - end.median()) / end.std()) < dev
+                        cleaned_temp_batch = list(end[mask].index)
+                        if len(cleaned_temp_batch) >= k_min:
+                            start_batches.append(cleaned_temp_batch)
+
+
+                    temp_batch = []
+                    temp_batch.append(j)
             else:
                 if len(temp_batch) >= k_min:
                     end = observations['end_time'][temp_batch[0]:temp_batch[-1]+1].reindex(temp_batch)
@@ -185,28 +197,16 @@ class EventLog:
 
                 temp_batch = []
                 temp_batch.append(j)
-        else:
-            if len(temp_batch) >= k_min:
-                end = observations['end_time'][temp_batch[0]:temp_batch[-1]+1].reindex(temp_batch)
-                start = observations['start_time'][temp_batch[0]:temp_batch[-1]+1].reindex(temp_batch)
-                mask = abs((end - end.median()) / end.std()) < dev
-                cleaned_temp_batch = list(end[mask].index)
-                if len(cleaned_temp_batch) >= k_min:
-                    start_batches.append(cleaned_temp_batch)
 
+        for j in range(len(observations)):
+            if classes[j] == 0:
+                for batch in range(len(start_batches)):
+                    if j in start_batches[batch]:
+                        classes[j] = 2
+                        break
 
-            temp_batch = []
-            temp_batch.append(j)
-    
-    for j in range(len(observations)):
-        if classes[j] == 0:
-            for batch in range(len(start_batches)):
-                if j in start_batches[batch]:
-                    classes[j] = 2
-                    break
-
-    observations['class'] = classes
-    return list(observations.sort_values(by='index')['class'])
+        observations['class'] = classes
+        return list(observations.sort_values(by='index')['class'])
     
     @staticmethod
     def classify_duration_hist(duration, num_classes):
