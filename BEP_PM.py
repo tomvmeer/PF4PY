@@ -116,16 +116,17 @@ class EventLog:
                     return filtered_segments
 
     @staticmethod
-    def batch_classifier(df, k_min=10, gamma=0):
+    def batch_classifier(df, k_min=10, gamma=0, dev = 1):
         """
-        Input: df: Dataframe containing the start and end time of each line/(sub-)trace per segment
-        k_min: number of subsequent lines/(sub-)traces that must fulfill the batching constraints to be considered a batch 
+        Input: df: Dataframe containing the start and end time of each line/(sub-)trace per segment.
+        k_min: number of subsequent lines/(sub-)traces that must fulfill the batching constraints to be considered a batch.
         gamma: The distance allowed between subsequent lines/(sub-)traces to be considered a batch.
-        Output: List of binary class values indicating if a line/(sub-)trace belongs to a batch
+        dev: The amount of standard deviations the standardized times can be apart from each other; The lower the value, the stricter the batching; 1 <= dev <= 4
+        Output: List of binary class values indicating if a line/(sub-)trace belongs to a batch.
         """
-        batches = []
+        start_batches = []
+        end_batches = []
         temp_batch = []
-
         df_sorted = df.sort_values(by=['start_time', 'end_time'], axis=0)
         observations = df_sorted.reset_index()
 
@@ -135,24 +136,67 @@ class EventLog:
                 j - 1] and observations['start_time'][j] >= observations['start_time'][j - 1]:
                 temp_batch.append(j)
                 if j == len(observations) - 1 and len(temp_batch) >= k_min:
-                    batches.append(temp_batch)
+                    end_batches.append(temp_batch)
             else:
                 if len(temp_batch) >= k_min:
-                    batches.append(temp_batch)
+                    end_batches.append(temp_batch)
+
                 temp_batch = []
                 temp_batch.append(j)
 
+       # batches = start_batches + end_batches
         classes = []
         for j in range(len(observations)):
             is_classified = False
-            for i in range(len(batches)):
-                if j in batches[i]:
-                    #                 classes.append(i)
+            for batch in range(len(end_batches)):
+                if j in end_batches[batch]:
                     classes.append(1)
                     is_classified = True
+                    break
+
             if not is_classified:
-                #             classes.append(np.nan)
                 classes.append(0)
+
+        temp_batch = []
+        temp_batch.append(0)
+        #start_temp_batch.append(0)
+        for j in range(1,len(observations)):
+            if classes[j] != 1:
+                if observations['start_time'][j] == observations['start_time'][j-1] and observations['end_time'][j-1] <= observations['end_time'][j]:
+                   temp_batch.append(j)
+                    if j == len(observations) - 1 and len(temp_batch) >= k_min:
+                        end = observations['end_time'][temp_batch[0]:temp_batch[-1]+1].reindex(temp_batch)
+                        mask = abs((end - end.median()) / end.std()) < dev
+                        cleaned_temp_batch = list(end[mask].index)
+                        if len(cleaned_temp_batch) >= k_min:
+                            start_batches.append(cleaned_temp_batch)
+                else:
+                    if len(temp_batch) >= k_min:
+                        end = observations['end_time'][temp_batch[0]:temp_batch[-1]+1].reindex(temp_batch)
+                        start = observations['start_time'][temp_batch[0]:temp_batch[-1]+1].reindex(temp_batch)
+                        mask = abs((end - end.median()) / end.std()) < dev
+                        cleaned_temp_batch = list(end[mask].index)
+                        if len(cleaned_temp_batch) >= k_min:
+                            start_batches.append(cleaned_temp_batch)
+                    temp_batch = []
+                    temp_batch.append(j)
+            else:
+                if len(temp_batch) >= k_min:
+                    end = observations['end_time'][temp_batch[0]:temp_batch[-1]+1].reindex(temp_batch)
+                    start = observations['start_time'][temp_batch[0]:temp_batch[-1]+1].reindex(temp_batch)
+                    mask = abs((end - end.median()) / end.std()) < dev
+                    cleaned_temp_batch = list(end[mask].index)
+                    if len(cleaned_temp_batch) >= k_min:
+                        start_batches.append(cleaned_temp_batch)
+                temp_batch = []
+                temp_batch.append(j)
+
+        for j in range(len(observations)):
+            if classes[j] == 0:
+                for batch in range(len(start_batches)):
+                    if j in start_batches[batch]:
+                        classes[j] = 2
+                        break
         observations['class'] = classes
         return list(observations.sort_values(by='index')['class'])
 
@@ -165,14 +209,15 @@ class EventLog:
         class_range = []
         for i in range(num_classes):
             if i == 0:
-                start = duration.min()
+                start = min(duration)
             else:
                 start = np.quantile(duration, (i * int(100 / num_classes) / 100))
             if i == num_classes - 1:
-                end = duration.max()
+                end = max(duration)
             else:
                 end = np.quantile(duration, ((i + 1) * int(100 / num_classes) / 100))
             class_range.append([start, end])
+
         classes = []
         for i in duration:
             for q in range(len(class_range)):
@@ -183,19 +228,16 @@ class EventLog:
                     classes.append(3)
         return classes
 
-    @staticmethod
-    def build_coordinates(pf, start_x, end_x):
-        pf['start'] = [(x, y) for x, y in zip(pf[start_x], pf['start_y'])]
-        pf['end'] = [(x, y) for x, y in zip(pf[end_x], pf['end_y'])]
-        return pf
+    def build_coordinates(self, start_x, end_x):
+        self.pf['start'] = [(x, y) for x, y in zip(start_x, self.pf['start_y'])]
+        self.pf['end'] = [(x, y) for x, y in zip(end_x, self.pf['end_y'])]
 
-    def classify(self, pf, classifier, metric, args):
+    def classify(self, classifier, metric, args):
         for i in range(len(self.segments)):
-            pf.loc[pf['segment_index'] == i, 'class'] = classifier(
-                pf[pf['segment_index'] == i][metric], *args)
-        return pf
+            self.pf.loc[self.pf['segment_index'] == i, 'class'] = classifier(
+                self.pf[self.pf['segment_index'] == i][metric], *args)
 
-    def performance_spectrum(self, segments, x_max, segment_height=20):
+    def performance_spectrum(self, segments, x_max, classifier, metric, args, segment_height=20):
         """
         Input: segments: Array with defined start and end name of all the segments to be included. x_max: maximum x
         value to be considered when calculating the performance spectrum. classifier: function that will be called with
@@ -246,7 +288,7 @@ class EventLog:
         self.pf['case_id'] = trace_index
 
     def plot_performance_spectrum(self, class_colors, ax, classifier, metric, args, mask=None, start='start_time',
-                                  end='end_time'):
+                                  end='end_time', order=None:
         """
         Input: class_colors: list with rgba tuples, there should be a color for each class. ax: A Matplotlib axis
         object. mask: any Pandas mask on the Performance Spectrum Data Frame to be considered before plotting.
@@ -257,7 +299,8 @@ class EventLog:
         if mask is not None:
             pf = pf[mask]
         pf = self.build_coordinates(pf, start, end)
-        for i in range(len(class_colors), -1, -1):
+        plotting_order = range(len(class_colors)) if order == 'reversed' else reversed(range(len(class_colors)))
+        for i in plotting_order:
             lines = [[start, end] for start, end in
                      zip(pf[pf['class'] == i]['start'], pf[pf['class'] == i]['end'])]
             ax.add_collection(
