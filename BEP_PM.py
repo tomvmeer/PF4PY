@@ -165,15 +165,14 @@ class EventLog:
         class_range = []
         for i in range(num_classes):
             if i == 0:
-                start = min(duration)
+                start = duration.min()
             else:
                 start = np.quantile(duration, (i * int(100 / num_classes) / 100))
             if i == num_classes - 1:
-                end = max(duration)
+                end = duration.max()
             else:
                 end = np.quantile(duration, ((i + 1) * int(100 / num_classes) / 100))
             class_range.append([start, end])
-
         classes = []
         for i in duration:
             for q in range(len(class_range)):
@@ -184,16 +183,19 @@ class EventLog:
                     classes.append(3)
         return classes
 
-    def build_coordinates(self, start_x, end_x):
-        self.pf['start'] = [(x, y) for x, y in zip(start_x, self.pf['start_y'])]
-        self.pf['end'] = [(x, y) for x, y in zip(end_x, self.pf['end_y'])]
+    @staticmethod
+    def build_coordinates(pf, start_x, end_x):
+        pf['start'] = [(x, y) for x, y in zip(pf[start_x], pf['start_y'])]
+        pf['end'] = [(x, y) for x, y in zip(pf[end_x], pf['end_y'])]
+        return pf
 
-    def classify(self, classifier, metric, args):
+    def classify(self, pf, classifier, metric, args):
         for i in range(len(self.segments)):
-            self.pf.loc[self.pf['segment_index'] == i, 'class'] = classifier(
-                self.pf[self.pf['segment_index'] == i][metric], *args)
+            pf.loc[pf['segment_index'] == i, 'class'] = classifier(
+                pf[pf['segment_index'] == i][metric], *args)
+        return pf
 
-    def performance_spectrum(self, segments, x_max, classifier, metric, args, segment_height=20):
+    def performance_spectrum(self, segments, x_max, segment_height=20):
         """
         Input: segments: Array with defined start and end name of all the segments to be included. x_max: maximum x
         value to be considered when calculating the performance spectrum. classifier: function that will be called with
@@ -243,20 +245,18 @@ class EventLog:
         self.pf['segment_index'] = segment_index
         self.pf['case_id'] = trace_index
 
-        self.build_coordinates(self.pf['start_time'], self.pf['end_time'])
-        self.classify(classifier, metric, args)
-
-    def plot_performance_spectrum(self, class_colors, ax, mask=None):
+    def plot_performance_spectrum(self, class_colors, ax, classifier, metric, args, mask=None, start='start_time',
+                                  end='end_time'):
         """
         Input: class_colors: list with rgba tuples, there should be a color for each class. ax: A Matplotlib axis
         object. mask: any Pandas mask on the Performance Spectrum Data Frame to be considered before plotting.
         Output: The Matplotlib axis object containing the plotted Performance Spectrum.
         """
+        pf = self.pf.copy()
+        pf = self.classify(pf, classifier, metric, args)
         if mask is not None:
-            pf = self.pf[mask].copy()
-        else:
-            pf = self.pf.copy()
-
+            pf = pf[mask]
+        pf = self.build_coordinates(pf, start, end)
         for i in range(len(class_colors), -1, -1):
             lines = [[start, end] for start, end in
                      zip(pf[pf['class'] == i]['start'], pf[pf['class'] == i]['end'])]
@@ -266,7 +266,7 @@ class EventLog:
         props = dict(boxstyle='round', facecolor='white', alpha=0.5)
         for i, y in enumerate(self.y_s):
             text_str = f'{self.segments[i][0]} \n{self.segments[i][1]}'
+            ax.add_collection(plt.hlines(y, 0, max(pf['end_time']), alpha=0.25))
             ax.text(0.05, y[0] / (abs(ax.get_ylim()[0]) + abs(ax.get_ylim()[1])), text_str, transform=ax.transAxes,
                     fontsize=12,
                     verticalalignment='top', bbox=props)
-            ax.add_collection(plt.hlines(y, 0, max(pf['end_time']), alpha=0.25))
