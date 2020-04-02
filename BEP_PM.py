@@ -235,11 +235,14 @@ class EventLog:
         pf['end'] = [(x, y) for x, y in zip(pf[end_x], pf['end_y'])]
         return pf
 
-    def classify(self, pf, classifier, metric, args):
+    def classify(self, pf, classifier, metric, args, inplace=False):
         for i in range(len(self.segments)):
             pf.loc[pf['segment_index'] == i, 'class'] = classifier(
                 pf[pf['segment_index'] == i][metric], *args)
-        return pf
+        if inplace:
+            self.pf = pf
+        else:
+            return pf
 
     def performance_spectrum(self, segments, x_max, segment_height=20):
         """
@@ -291,17 +294,33 @@ class EventLog:
         self.pf['segment_index'] = segment_index
         self.pf['case_id'] = trace_index
 
-    def plot_performance_spectrum(self, class_colors, ax, classifier, metric, args, mask=None, start='start_time',
-                                  end='end_time', order=None):
+    def plot_performance_spectrum(self, class_colors, ax, classifier=None, metric='', args=None, mask=None,
+                                  start='start_time',
+                                  end='end_time', order=None, compare='global', show_classes=None, vis_mask=False):
         """
         Input: class_colors: list with rgba tuples, there should be a color for each class. ax: A Matplotlib axis
         object. mask: any Pandas mask on the Performance Spectrum Data Frame to be considered before plotting.
         Output: The Matplotlib axis object containing the plotted Performance Spectrum.
         """
+        if args is None:
+            args = []
         pf = self.pf.copy()
-        pf = self.classify(pf, classifier, metric, args)
-        if mask is not None:
-            pf = pf[mask]
+        if vis_mask:
+            pf.loc[mask, 'class'] = 1
+            pf.loc[~mask, 'class'] = 0
+        else:
+            if compare == 'global':
+                if classifier is not None:
+                    pf = self.classify(pf, classifier, metric, args)
+                if mask is not None:
+                    pf = pf[mask]
+            elif compare == 'local':
+                if mask is not None:
+                    pf = pf[mask]
+                if classifier is not None:
+                    pf = self.classify(pf, classifier, metric, args)
+        if show_classes is not None:
+            pf = pf[pf['class'].isin(show_classes)]
         pf = self.build_coordinates(pf, start, end)
         plotting_order = range(len(class_colors)) if order == 'reversed' else reversed(range(len(class_colors)))
         for i in plotting_order:
