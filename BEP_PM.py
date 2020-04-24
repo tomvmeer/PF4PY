@@ -178,6 +178,8 @@ class EventLog:
                     observations['start_time'][j - 1]) and (
                         observations['end_time'][j + 1] > observations['end_time'][j] >= observations['end_time'][
                     j - 1]):
+
+
                     temp_batch.append(j)
                     resources.append(observations['resource'][j])
                     if j == len(observations) - 1 and len(temp_batch) >= k_min:
@@ -244,16 +246,22 @@ class EventLog:
                     classes.append(3)
         return classes
 
-    def build_coordinates(self, start_x, end_x):
-        self.pf['start'] = [(x, y) for x, y in zip(start_x, self.pf['start_y'])]
-        self.pf['end'] = [(x, y) for x, y in zip(end_x, self.pf['end_y'])]
+    @staticmethod
+    def build_coordinates(pf, start_x, end_x):
+        pf['start'] = [(x, y) for x, y in zip(pf[start_x], pf['start_y'])]
+        pf['end'] = [(x, y) for x, y in zip(pf[end_x], pf['end_y'])]
+        return pf
 
-    def classify(self, classifier, metric, args):
+    def classify(self, pf, classifier, metric, args, inplace=False):
         for i in range(len(self.segments)):
-            self.pf.loc[self.pf['segment_index'] == i, 'class'] = classifier(
-                self.pf[self.pf['segment_index'] == i][metric], *args)
+            pf.loc[pf['segment_index'] == i, 'class'] = classifier(
+                pf[pf['segment_index'] == i][metric], *args)
+        if inplace:
+            self.pf = pf
+        else:
+            return pf
 
-    def performance_spectrum(self, segments, x_max, classifier, metric, args, segment_height=20):
+    def performance_spectrum(self, segments, x_max, segment_height=20):
         """
         Input: segments: Array with defined start and end name of all the segments to be included. x_max: maximum x
         value to be considered when calculating the performance spectrum. classifier: function that will be called with
@@ -303,20 +311,35 @@ class EventLog:
         self.pf['segment_index'] = segment_index
         self.pf['case_id'] = trace_index
 
-        self.build_coordinates(self.pf['start_time'], self.pf['end_time'])
-        self.classify(classifier, metric, args)
-
-    def plot_performance_spectrum(self, class_colors, ax, mask=None, order=None, alpha=0.25):
+    def plot_performance_spectrum(self, class_colors, ax, classifier=None, metric='', args=None, mask=None,
+                                  start='start_time',
+                                  end='end_time', order=None, compare='global', show_classes=None, vis_mask=False):
         """
         Input: class_colors: list with rgba tuples, there should be a color for each class. ax: A Matplotlib axis
         object. mask: any Pandas mask on the Performance Spectrum Data Frame to be considered before plotting.
         Output: The Matplotlib axis object containing the plotted Performance Spectrum.
         """
-        if mask is not None:
-            pf = self.pf[mask].copy()
+        if args is None:
+            args = []
+        pf = self.pf.copy()
+        if vis_mask:
+            pf.loc[mask, 'class'] = 1
+            pf.loc[~mask, 'class'] = 0
         else:
-            pf = self.pf.copy()
-        plotting_order =  range(len(class_colors)) if order == 'reversed' else reversed(range(len(class_colors)))
+            if compare == 'global':
+                if classifier is not None:
+                    pf = self.classify(pf, classifier, metric, args)
+                if mask is not None:
+                    pf = pf[mask]
+            elif compare == 'local':
+                if mask is not None:
+                    pf = pf[mask]
+                if classifier is not None:
+                    pf = self.classify(pf, classifier, metric, args)
+        if show_classes is not None:
+            pf = pf[pf['class'].isin(show_classes)]
+        pf = self.build_coordinates(pf, start, end)
+        plotting_order = range(len(class_colors)) if order == 'reversed' else reversed(range(len(class_colors)))
         for i in plotting_order:
             lines = [[start, end] for start, end in
                      zip(pf[pf['class'] == i]['start'], pf[pf['class'] == i]['end'])]
@@ -326,7 +349,7 @@ class EventLog:
         props = dict(boxstyle='round', facecolor='white', alpha=0.5)
         for i, y in enumerate(self.y_s):
             text_str = f'{self.segments[i][0]} \n{self.segments[i][1]}'
+            ax.add_collection(plt.hlines(y, 0, max(pf['end_time']), alpha=0.25))
             ax.text(0.05, y[0] / (abs(ax.get_ylim()[0]) + abs(ax.get_ylim()[1])), text_str, transform=ax.transAxes,
                     fontsize=12,
                     verticalalignment='top', bbox=props)
-            ax.add_collection(plt.hlines(y, 0, max(pf['end_time']), alpha=alpha))
