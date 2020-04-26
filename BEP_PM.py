@@ -331,8 +331,11 @@ class EventLog:
         ax.autoscale()
         props = dict(boxstyle='round', facecolor='white', alpha=0.5)
         for i, y in enumerate(self.y_s):
-            text_str = f'{self.segments[i][0]} \n{self.segments[i][1]}'
-            ax.add_collection(plt.hlines(y, 0, max(pf['end_time']), alpha=0.25))
-            ax.text(0.05, y[0] / (abs(ax.get_ylim()[0]) + abs(ax.get_ylim()[1])), text_str, transform=ax.transAxes,
+            if type(self.segments[i]) == list:
+                text_str = f'{self.segments[i][0]} \n{self.segments[i][1]}'
+            else:
+                text_str = self.segments[i]
+            ax.add_collection(plt.hlines(y, -1*(max(pf['end_time'])/3), max(pf['end_time']), alpha=0.25))
+            ax.text(-1*(max(pf['end_time'])/3), y[1] + (y[0]-y[1])/1.5, text_str,
                     fontsize=12,
                     verticalalignment='top', bbox=props)
