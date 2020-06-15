@@ -1,7 +1,7 @@
 # PF4PY
 
 
-This is an implementation of the Performance Spectrum visualisation. All credit goes to the orginal authors:
+This is an implementation and expantion of the Performance Spectrum visualisation. All credit goes to the orginal authors:
 
 Denisov, V., Belkina, E., Fahland, D., & van der Aalst, W. M. P. (2018). 
 The performance spectrum miner: visual analytics for fine-grained performance analysis of processes. 
