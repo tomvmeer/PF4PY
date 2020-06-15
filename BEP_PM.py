@@ -4,29 +4,25 @@ import datetime
 from matplotlib import collections as mc
 import numpy as np
 import pandas as pd
+from pm4py.objects.log.importer.xes import factory as importer
 
 
 class EventLog:
-    def __init__(self, name, event_id, timestamp_id, log=None, resource_id=None):
+    def __init__(self, name, file):
+        self.timestamp_id = 'time:timestamp'
+        self.event_id = 'concept:name'
+
         self.segment_count = {}
-
-        # Names of keys in log file:
-        self.event_id = event_id
-        self.timestamp_id = timestamp_id
-        self.resource_id = resource_id
-
-        # Loading in a log object previously loaded:
-        if not log:
-            self.log = self.load(name)  # TODO implement faster loading.
-        else:
-            self.log = log
-            self.clean_timezone()
+        print('> Loading event log.')
+        self.log = importer.apply(file)
+        print('> Cleaning time zone information, adjust to 0.')
+        self.clean_timezone()
 
         # Set the begin and end date.
-        self.first = datetime.datetime(9999, 12, 31)
-        self.last = datetime.datetime(1, 1, 1)
-        # Counting the types of traces, this method also fixes first and last, initialized above.
-        self.event_count = self.count_trace_types()
+        self.first = min(
+            [min(self.log[i][k]['time:timestamp'] for k in range(len(self.log[i]))) for i in range(len(self.log))])
+        self.last = max(
+            [max(self.log[i][k]['time:timestamp'] for k in range(len(self.log[i]))) for i in range(len(self.log))])
 
         # Name of the dataset.
         self.name = name
@@ -39,6 +35,68 @@ class EventLog:
         self.x_max = 0
         # Saved filtering of segments used to plot.
         self.segments = []
+        print(f'> Found dates in event log ranging from {self.first} to {self.last}.')
+        print('> Done, continue with load_frame.')
+
+    def load_frame(self, maxdate=None):
+        if maxdate:
+            matches_date = [i for i in range(len(self.log)) if self.log[i][0]['time:timestamp'] < maxdate]
+        else:
+            matches_date = range(len(self.log))
+        print('> Creating Pandas DataFrame from event log, this might take a while...')
+        pf = pd.concat([pd.DataFrame(self.log[i]) for i in matches_date], sort=False)
+        pf.loc[pf.index == 0, 'case_id'] = [i for i in range((pf.index == 0).sum())]
+        pf['case_id'] = pf['case_id'].fillna(method='ffill')
+
+        self.pf = pf.sort_values('case_id').copy()
+        self.pf['org:resource'] = self.pf['org:resource'].fillna(method='ffill')
+        self.pf.reset_index(drop=True, inplace=True)
+        print('> Done, continue with inspection of pf and create_structure')
+
+    def create_structure(self, concept_names_mask=None):
+        if concept_names_mask is not None:
+            df = self.pf[concept_names_mask].sort_values(['case_id', 'time:timestamp', 'concept:name'])
+        else:
+            df = self.pf.sort_values(['case_id', 'time:timestamp', 'concept:name'])
+        print('> Shifting log to generate case transitions.')
+        t = pd.concat([df, df.shift(-1)], axis=1)
+        t.columns = [str(i) + str(k // (len(df.columns))) for k, i in enumerate(t.columns)]
+        t = t[t['case_id0'] == t['case_id1']]
+
+        t['segment_name'] = t['concept:name0'] + ' ' + t['lifecycle:transition0'] + ' - ' + t['concept:name1'] + ' ' + \
+                            t['lifecycle:transition1']
+        t.drop(['concept:name0', 'lifecycle:transition0', 'lifecycle:transition1', 'case_id1', 'concept:name1'], axis=1,
+               inplace=True)
+        t.columns = ['start_' + i.split('0')[0] if '0' in i else ('end_' + i.split('1')[0] if '1' in i else i) for i in
+                     t.columns]
+
+        self.segments = t['segment_name'].unique()
+        self.pf = t.copy()
+        print('> Adjusting time-grain to seconds.')
+        self.pf['end_time:timestamp'] = self.pf['end_time:timestamp'] - self.first
+        self.pf['end_time:timestamp'] = self.pf['end_time:timestamp'].dt.days * 24 + round(
+            self.pf['end_time:timestamp'].dt.seconds / 3600)
+
+        self.pf['start_time:timestamp'] = self.pf['start_time:timestamp'] - self.first
+        self.pf['start_time:timestamp'] = self.pf['start_time:timestamp'].dt.days * 24 + round(
+            self.pf['start_time:timestamp'].dt.seconds / 3600)
+
+        self.pf['duration'] = self.pf['end_time:timestamp'] - self.pf['start_time:timestamp']
+
+        self.pf['segment_index'] = self.pf['segment_name'].apply(lambda x: list(self.segments).index(x))
+        print('> Done, continue with remove_meta to remove columns from pf and to correct naming.')
+
+    def remove_meta(self, to_keep=None):
+        if to_keep is None:
+            to_keep = []
+        columns = ['start_case_id', 'start_org:resource', 'end_org:resource', 'start_time:timestamp',
+                   'end_time:timestamp', 'segment_name', 'duration', 'segment_index']
+        columns.extend(to_keep)
+        self.pf = self.pf[columns]
+        renamed = ['case_id', 'start_org:resource', 'end_org:resource', 'start_time', 'end_time', 'segment_name',
+                   'duration', 'segment_index']
+        renamed.extend(to_keep)
+        self.pf.columns = renamed
 
     def clean_timezone(self):
         """
@@ -63,37 +121,8 @@ class EventLog:
     def load(name):
         return pickle.load(open(name + '.dat', 'rb'))
 
-    def count_trace_types(self):
-        """
-        Output: count of how often each unique trace occurs.
-        """
-        self.event_count = {}
-        for i in range(len(self.log)):
-            trace = (self.log[i][0][self.event_id], self.log[i][-1][self.event_id])
-            if self.log[i][0][self.timestamp_id] < self.first:
-                self.first = self.log[i][0][self.timestamp_id]
-            if self.log[i][-1][self.timestamp_id] > self.last:
-                self.last = self.log[i][-1][self.timestamp_id]
-
-            if trace not in self.event_count:
-                self.event_count[trace] = 1
-            else:
-                self.event_count[trace] += 1
-        return self.event_count
-
-    def count_segment_types(self):
-        """
-        Output: count of how often each segment in a trace occurred.
-        """
-        for i in range(len(self.log)):
-            for n in range(0, len(self.log[i]) - 1):
-                segment = (self.log[i][n][self.event_id], self.log[i][n + 1][self.event_id])
-                if segment not in self.segment_count:
-                    self.segment_count[segment] = 1
-                else:
-                    self.segment_count[segment] += 1
-        self.segment_count = {k: v for k, v in reversed(sorted(self.segment_count.items(), key=lambda item: item[1]))}
-        return self.segment_count
+    def segment_counts(self):
+        return dict(self.pf['segment_name'].value_counts())
 
     def filter_segments(self, cutoff=0.25, compare_to='previous'):
         """
@@ -101,7 +130,7 @@ class EventLog:
         compared to the occurrence of either the maximum or previous segment.
         Output: Frequently occurring segments according to cutoff value.
         """
-        sorted_counts = self.count_segment_types()
+        sorted_counts = self.segment_counts()
         filtered_segments = [list(sorted_counts.keys())[0]]
         for i in range(1, len(sorted_counts.values())):
             if compare_to == 'previous':
@@ -114,112 +143,31 @@ class EventLog:
                     filtered_segments.append(list(sorted_counts.keys())[i])
                 else:
                     return filtered_segments
+        return filtered_segments
+
+    def infer_start_times(self):
+        t = self.pf.copy()
+        t['start'] = [i[0] for i in self.pf['segment_name'].str.split(' - ')]
+        t['end'] = [i[1] for i in self.pf['segment_name'].str.split(' - ')]
+        s = t[['case_id', 'start_org:resource', 'start_time', 'start']]
+        s.columns = ['case_id', 'org:resource', 'end_time', 'segment_name']
+        e = t[['case_id', 'end_org:resource', 'end_time', 'end']]
+        e.columns = ['case_id', 'org:resource', 'end_time', 'segment_name']
+        t = pd.concat([e, s], axis=0).sort_values(['org:resource', 'end_time']).reset_index(drop=True)
+        t['start_time'] = t.shift()[t.shift()['org:resource'] == t['org:resource']]['end_time']
+        t.sort_values('case_id', inplace=True)
+        t['duration'] = t['end_time'] - t['start_time']
+        return t[t['duration'] > 0]
+
+
+class Spectrum:
+    def __init__(self, segments, pf):
+        self.segments = segments
+        self.pf = pf[pf['segment_name'].isin(self.segments)].copy()
+        self.pf['segment_index'] = self.pf['segment_name'].apply(lambda x: list(self.segments).index(x))
 
     @staticmethod
-    def classify_batch_by_resource(df, k_min=10, gamma=0):
-        '''Input: df containing the columns ['start_time', 'end_time', 'resource']
-                  k_min: min. batch size
-                  gamma: time difference within batch processing
-           Output: Batch Classification'''
-        batches = []
-        temp_batch = []
-        resources = []
-        df_sorted = df.sort_values(by=['start_time', 'end_time'], axis=0)
-        observations = df_sorted.reset_index()
-        observations['class'] = np.zeros(len(observations))
-
-        temp_batch.append(0)
-        resources.append(observations['resource'][0])
-        for j in range(1, len(observations)):
-            if (observations['end_time'][j - 1] <= observations['end_time'][j] <= gamma + observations['end_time'][
-                j - 1]) and (observations['start_time'][j] >= observations['start_time'][j - 1]):
-                temp_batch.append(j)
-                resources.append(observations['resource'][j])
-                if j == len(observations) - 1 and len(temp_batch) >= k_min:
-                    if len(list(set(resources))) == 1:
-                        observations.loc[
-                            (observations.index >= temp_batch[0]) & (observations.index <= temp_batch[-1]), 'class'] = 1
-                    elif 1 < len(set(resources)) < 10:
-                        observations.loc[
-                            (observations.index >= temp_batch[0]) & (
-                                    observations.index <= temp_batch[-1]), 'class'] = 2
-                    else:
-                        observations.loc[
-                            (observations.index >= temp_batch[0]) & (
-                                    observations.index <= temp_batch[-1]), 'class'] = 3
-            else:
-                if len(temp_batch) >= k_min:
-                    if len(list(set(resources))) == 1:
-                        observations.loc[
-                            (observations.index >= temp_batch[0]) & (observations.index <= temp_batch[-1]), 'class'] = 1
-                    elif 1 < len(set(resources)) < 10:
-                        observations.loc[
-                            (observations.index >= temp_batch[0]) & (
-                                    observations.index <= temp_batch[-1]), 'class'] = 2
-                    else:
-                        observations.loc[
-                            (observations.index >= temp_batch[0]) & (
-                                    observations.index <= temp_batch[-1]), 'class'] = 3
-                    batches.append(temp_batch)
-
-                temp_batch = []
-                resources = []
-                temp_batch.append(j)
-                resources.append(observations['resource'][j])
-
-        temp_batch = []
-        resources = []
-
-        temp_batch.append(0)
-        resources.append(observations['resource'][0])
-        for j in range(1, len(observations)):
-            if (observations['class'][j] == 0) and j < len(observations) - 1:
-                if (observations['start_time'][j - 1] <= observations['start_time'][j] <= gamma +
-                    observations['start_time'][j - 1]) and (
-                        observations['end_time'][j + 1] > observations['end_time'][j] >= observations['end_time'][
-                    j - 1]):
-
-
-                    temp_batch.append(j)
-                    resources.append(observations['resource'][j])
-                    if j == len(observations) - 1 and len(temp_batch) >= k_min:
-                        if len(set(resources)) == 1:
-                            observations.loc[
-                                (observations.index >= temp_batch[0]) & (
-                                            observations.index <= temp_batch[-1]), 'class'] = 1
-                        elif  1 < len(set(resources)) < 10:
-                            observations.loc[
-                                (observations.index >= temp_batch[0]) & (
-                                            observations.index <= temp_batch[-1]), 'class'] = 2
-                        else:
-                            observations.loc[
-                                (observations.index >= temp_batch[0]) & (
-                                        observations.index <= temp_batch[-1]), 'class'] = 3
-                        batches.append(temp_batch)
-                else:
-                    if len(temp_batch) >= k_min:
-                        if len(set(resources)) == 1:
-                            observations.loc[
-                                (observations.index >= temp_batch[0]) & (
-                                        observations.index <= temp_batch[-1]), 'class'] = 1
-                        elif 1 < len(set(resources)) < 10:
-                            observations.loc[
-                                (observations.index >= temp_batch[0]) & (
-                                        observations.index <= temp_batch[-1]), 'class'] = 2
-                        else:
-                            observations.loc[
-                                (observations.index >= temp_batch[0]) & (
-                                        observations.index <= temp_batch[-1]), 'class'] = 3
-                        batches.append(temp_batch)
-                    temp_batch = []
-                    resources = []
-                    temp_batch.append(j)
-                    resources.append(observations['resource'][j])
-        return list(observations.sort_values(by = 'index')['class'])
-
-
-    @staticmethod
-    def classify_duration_hist(duration, num_classes):
+    def classify_hist(duration, num_classes):
         """
         Input: Series containing duration values for a segment, number of distinct classes to derive.
         Output: List containing the assigned class-indicators according to the histogram.
@@ -246,12 +194,6 @@ class EventLog:
                     classes.append(3)
         return classes
 
-    @staticmethod
-    def build_coordinates(pf, start_x, end_x):
-        pf['start'] = [(x, y) for x, y in zip(pf[start_x], pf['start_y'])]
-        pf['end'] = [(x, y) for x, y in zip(pf[end_x], pf['end_y'])]
-        return pf
-
     def classify(self, pf, classifier, metric, args, inplace=False):
         for i in range(len(self.segments)):
             pf.loc[pf['segment_index'] == i, 'class'] = classifier(
@@ -261,59 +203,19 @@ class EventLog:
         else:
             return pf
 
-    def performance_spectrum(self, segments, x_max, segment_height=20):
-        """
-        Input: segments: Array with defined start and end name of all the segments to be included. x_max: maximum x
-        value to be considered when calculating the performance spectrum. classifier: function that will be called with
-        as first argument the column of the performance spectrum named 'metric' and with any extra arguments contained
-        in list 'args'. segment_height: height of each segment to be plotted.
-        """
-        self.x_max = x_max
-        self.segments = segments
-        self.y_s = [[y, y - segment_height] for y in range(segment_height * len(segments), 0, -segment_height)]
-        segment_start = [[], []]
-        segment_end = [[], []]
-        duration = []
-        segment_names = []
-        segment_index = []
-        resource = []
-        trace_index = []
-        for i in range(len(self.log)):
-            def_resource = np.nan
-            for n in range(len(self.log[i]) - 1):
-                segment = (self.log[i][n][self.event_id], self.log[i][n + 1][self.event_id])
-                if segment in segments:
-                    start = (self.log[i][n][self.timestamp_id] - self.first).days
-                    end = (self.log[i][n + 1][self.timestamp_id] - self.first).days
-                    if end <= x_max:
-                        duration.append(end - start)
-                        x = [start, end]
-                        y = self.y_s[segments.index(segment)]
-                        segment_start[0].append(x[0])
-                        segment_start[1].append(y[0])
-                        segment_end[0].append(x[1])
-                        segment_end[1].append(y[1])
-                        segment_names.append(segment)
-                        segment_index.append(segments.index(segment))
-                        trace_index.append(i)
-                        if self.resource_id:
-                            if self.resource_id in self.log[i][n]:
-                                def_resource = self.log[i][n][self.resource_id]
-                            resource.append(def_resource)
-
-        self.pf['resource'] = resource
-        self.pf['start_time'] = segment_start[0]
-        self.pf['start_y'] = segment_start[1]
-        self.pf['end_time'] = segment_end[0]
-        self.pf['end_y'] = segment_end[1]
-        self.pf['duration'] = duration
-        self.pf['segment_name'] = segment_names
-        self.pf['segment_index'] = segment_index
-        self.pf['case_id'] = trace_index
+    def build_coordinates(self, pf, start_x, end_x):
+        pf['start_y'] = (200 // len(self.segments)) * (len(self.segments) - pf['segment_index'])
+        pf['end_y'] = pf['start_y'] - (200 // len(self.segments))
+        self.y_s = [[y, y - (200 // len(self.segments))] for y in
+                    range((200 // len(self.segments)) * len(self.segments), 0, -(200 // len(self.segments)))]
+        pf['start'] = [(x, y) for x, y in zip(pf[start_x], pf['start_y'])]
+        pf['end'] = [(x, y) for x, y in zip(pf[end_x], pf['end_y'])]
+        return pf
 
     def plot_performance_spectrum(self, class_colors, ax, classifier=None, metric='', args=None, mask=None,
                                   start='start_time',
-                                  end='end_time', order=None, compare='global', show_classes=None, vis_mask=False):
+                                  end='end_time', order=None, compare='global', show_classes=None, vis_mask=False,
+                                  label_offset=0, exclude=None):
         """
         Input: class_colors: list with rgba tuples, there should be a color for each class. ax: A Matplotlib axis
         object. mask: any Pandas mask on the Performance Spectrum Data Frame to be considered before plotting.
@@ -321,7 +223,10 @@ class EventLog:
         """
         if args is None:
             args = []
-        pf = self.pf.copy()
+        if exclude is not None:
+            pf = self.pf[~exclude].copy()
+        else:
+            pf = self.pf.copy()
         if vis_mask:
             pf.loc[mask, 'class'] = 1
             pf.loc[~mask, 'class'] = 0
@@ -352,7 +257,7 @@ class EventLog:
                 text_str = f'{self.segments[i][0]} \n{self.segments[i][1]}'
             else:
                 text_str = self.segments[i]
-            ax.add_collection(plt.hlines(y, -1*(max(pf['end_time'])/3), max(pf['end_time']), alpha=0.25))
-            ax.text(-1*(max(pf['end_time'])/3), y[1] + (y[0]-y[1])/1.5, text_str,
+            ax.add_collection(plt.hlines(y, label_offset, max(pf['end_time']), alpha=0.25))
+            ax.text(label_offset, y[1] + (y[0] - y[1]) / 1.5, text_str,
                     fontsize=12,
                     verticalalignment='top', bbox=props)
