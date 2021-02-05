@@ -4,17 +4,16 @@ import datetime
 from matplotlib import collections as mc
 import numpy as np
 import pandas as pd
-from pm4py.objects.log.importer.xes import factory as importer
+from pm4py.objects.log import log
 
 
 class EventLog:
-    def __init__(self, name, file):
+    def __init__(self, name, eventlog):
         self.timestamp_id = 'time:timestamp'
         self.event_id = 'concept:name'
 
         self.segment_count = {}
-        print('> Loading event log.')
-        self.log = importer.apply(file)
+        self.log = eventlog
         print('> Cleaning time zone information, adjust to 0.')
         self.clean_timezone()
 
