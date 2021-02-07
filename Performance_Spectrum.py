@@ -7,6 +7,10 @@ import pandas as pd
 from pm4py.objects.log import log
 
 
+def load_log(name):
+    return pickle.load(open(name + '.dat', 'rb'))
+
+
 class EventLog:
     def __init__(self, name, eventlog):
         self.timestamp_id = 'time:timestamp'
@@ -114,11 +118,7 @@ class EventLog:
         Saves pickle file of a Log object.
         """
         with open(self.name + '.dat', 'wb') as f:
-            pickle.dump(self.log, f)
-
-    @staticmethod
-    def load(name):
-        return pickle.load(open(name + '.dat', 'rb'))
+            pickle.dump(self, f)
 
     def segment_counts(self):
         return dict(self.pf['segment_name'].value_counts())
@@ -222,10 +222,17 @@ class Spectrum:
         """
         if args is None:
             args = []
+
         if exclude is not None:
             pf = self.pf[~exclude].copy()
         else:
             pf = self.pf.copy()
+
+        if classifier is None and not vis_mask:
+            print(
+                '> No classifier defined, vis_mask=False so no coloring based on mask, coloring eveything in first color!')
+            pf['class'] = 0
+
         if vis_mask:
             pf.loc[mask, 'class'] = 1
             pf.loc[~mask, 'class'] = 0
